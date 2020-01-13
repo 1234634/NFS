@@ -22,7 +22,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 // timer interval defined as (TIMER_SEC + TIMER_NANO_SEC)
 #define TIMER_SEC    0
-#define TIMER_NANO_SEC  250*1000*1000 /* 250ms */
+#define TIMER_NANO_SEC  100*1000 /* 250ms */
 
 // NOTE: Check Broadcom BCM8325 datasheet, page 91+
 // NOTE: GPIO Base address is set to 0x7E200000,
@@ -141,8 +141,17 @@ typedef enum {GPIO_DIRECTION_IN = 0, GPIO_DIRECTION_OUT = 1} DIRECTION;
 #define GPIO_25 (25)
 #define GPIO_26 (26)
 #define GPIO_27 (27)
- 
-static int left_motor=0, right_motor =0, left =1, right=1;
+#define EN_LEFT (27)
+#define EN_RIGHT (27)
+#define PWM_LEFT (18)
+#define PWM_RIGHT (18)
+#define PIN_2A_LEFT (17)  // forward 0, backward 1 
+#define PIN_2A_RIGHT (17)
+#define STATUS_TEXT "__ rightMotorSpeed = %d, leftMotorSpeed = %d "  
+#define IDLE_COUNTER_MAX 10
+#define PINS_STATUS "EN = %d; PWM = %d; 2A = %d "
+static int speed =0, left =1, right=1, pwmCounter = 0,idleCounter = 0; //modularnost bi se dobila ako r i l imaju sign tj. r e[ -2, -1,1,2]
+bool fourLights = false;
 
 /* Declaration of gpio_driver.c functions */
 int gpio_driver_init(void);
@@ -151,6 +160,7 @@ static int gpio_driver_open(struct inode *, struct file *);
 static int gpio_driver_release(struct inode *, struct file *);
 static ssize_t gpio_driver_read(struct file *, char *buf, size_t , loff_t *);
 static ssize_t gpio_driver_write(struct file *, const char *buf, size_t , loff_t *);
+void gpioOutput( char argGpioPin, int argValue);
 
 /* Structure that declares the usual file access functions. */
 struct file_operations gpio_driver_fops =
@@ -192,16 +202,56 @@ void* virt_gpio_base;
  *   returns its offset from GPIO base address.
 i */
 
-int  pwmIntensity(char side)
+void  pwmSeter(void)
 {	
-	int ret = 0 ;
 
-	if(side == 'L')
-		ret = left_motor/10*1024/left;	
-	else if (side == 'R')
-		ret = right_motor/10*1024/right;
+	int pwmR,pwmL;
+		
+	
+	pwmL = ( ( 10 + speed/left ) % 10) > pwmCounter;
+	pwmR = ( ( 10 + speed/right ) % 10 ) > pwmCounter;
 
-	return ret;
+	pwmL =1; pwmR=1;
+	gpioOutput( PWM_RIGHT, pwmR);
+	gpioOutput( PWM_LEFT, pwmL);
+
+       // printk(KERN_INFO "pwmL: %d; pwmCounter= %d ",pwmL,pwmCounter);
+	
+	++pwmCounter;
+        pwmCounter %= 10;
+
+
+}
+
+void motorsDirectionsSeter(void)
+{
+	
+	int enable,value2A;
+	
+	
+	enable = (speed != 0);
+	gpioOutput( EN_RIGHT, enable);
+	gpioOutput( EN_LEFT, enable);
+
+	value2A = (speed < 0);
+	gpioOutput(PIN_2A_RIGHT,value2A);
+	gpioOutput(PIN_2A_LEFT,value2A);
+        
+	
+	if(!enable)
+	{
+		if( idleCounter != IDLE_COUNTER_MAX)
+			idleCounter++;
+		
+	}else
+	{
+		idleCounter =0;
+	
+	}
+		
+	fourLights = (idleCounter == IDLE_COUNTER_MAX);		
+	//timer continue
+	//printk(KERN_INFO "IDLE: %d  SMer 0 je napred 1 nazad : %d  four:%d \n",enable, value2A,fourLights);
 
 }
 
@@ -412,21 +462,14 @@ char GetGpioPinValue(char pin)
    flashes the LED0, reads the SW0 and prints its value to kernel log */
 static enum hrtimer_restart blink_timer_callback(struct hrtimer *param)
 {
-#ifdef TEST
-    static char power = 0x0;
-    static char gpio_12_val;
-
-    power ^= 0x1;
-
-    if (power)
-        SetGpioPin(GPIO_06);
-    else
-        ClearGpioPin(GPIO_06);
+/*#ifdef TEST
 
     gpio_12_val = GetGpioPinValue(GPIO_12);
-    printk(KERN_INFO "gpio_driver: gpio12 value: %d\n", gpio_12_val);
-#endif
-
+    printk(KERN_INFO "Speed:%d Right ;%d Left:%d  \n", speed,right,left);
+#endif*/
+    //pwmSeter();
+   // motorsDirectionsSeter();
+    
     hrtimer_forward(&blink_timer, ktime_get(), kt);
 
     return HRTIMER_RESTART;
@@ -480,16 +523,31 @@ int gpio_driver_init(void)
     /* Initialize GPIO pins. */
     /* LEDS */
     SetGpioPinDirection(GPIO_06, GPIO_DIRECTION_OUT);
+    SetGpioPinDirection(EN_LEFT, GPIO_DIRECTION_OUT);
+    SetGpioPinDirection(EN_RIGHT, GPIO_DIRECTION_OUT); 
+    SetGpioPinDirection(PIN_2A_LEFT, GPIO_DIRECTION_OUT);
+    SetGpioPinDirection(PIN_2A_RIGHT, GPIO_DIRECTION_OUT);
+    SetGpioPinDirection(PWM_LEFT, GPIO_DIRECTION_OUT);
+    SetGpioPinDirection(PWM_RIGHT, GPIO_DIRECTION_OUT);
+
 
     /* SWitches */
     SetInternalPullUpDown(GPIO_12, PULL_UP);
     SetGpioPinDirection(GPIO_12, GPIO_DIRECTION_IN);
+// Added for testing and uncoment hrtimer start 
+    gpioOutput( EN_RIGHT, 1);
+    gpioOutput( EN_LEFT, 1);
 
+	
+    gpioOutput(PIN_2A_RIGHT,0);
+    gpioOutput(PIN_2A_LEFT,0);
+    gpioOutput( PWM_RIGHT, 1);
+    gpioOutput( PWM_LEFT, 1);
     /* Initialize high resolution timer. */
     hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
     blink_timer.function = &blink_timer_callback;
-    hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
+   // hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 
     return 0;
 
@@ -506,6 +564,16 @@ fail_no_mem:
     return result;
 }
 
+void gpioOutput( char argGpioPin, int argValue)
+{
+
+    if (argValue)
+        SetGpioPin(argGpioPin);
+    else
+        ClearGpioPin(argGpioPin);
+
+
+}
 /*
  * Cleanup:
  *  1. stop the timer
@@ -526,6 +594,12 @@ void gpio_driver_exit(void)
 
     /* Set GPIO pins as inputs and disable pull-ups. */
     SetGpioPinDirection(GPIO_06, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(EN_LEFT, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(EN_RIGHT, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(PIN_2A_LEFT, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(PIN_2A_RIGHT, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(PWM_LEFT, GPIO_DIRECTION_IN);
+    SetGpioPinDirection(PWM_RIGHT, GPIO_DIRECTION_IN);
     SetInternalPullUpDown(GPIO_12, PULL_NONE);
 
     /* Unmap GPIO Physical address space. */
@@ -578,6 +652,12 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
 {
     /* Size of valid data in gpio_driver - data to send in user space. */
     int data_size = 0;
+    char status[BUF_LEN];
+
+   // snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
+    snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
+    strcat(gpio_driver_buffer,status);  	
+   
 
     /* TODO: fill gpio_driver_buffer here. */
 
@@ -585,7 +665,7 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
     {
         /* Get size of valid data. */
         data_size = strlen(gpio_driver_buffer);
-
+	
         /* Send data to user space. */
         if (copy_to_user(buf, gpio_driver_buffer, data_size) != 0)
         {
@@ -629,9 +709,9 @@ static ssize_t gpio_driver_write(struct file *filp, const char *buf, size_t len,
     {/* TODO: use gpio_driver_buffer here. */
 	//parsiras ovde buffer valjda i onda palis ledove sta treba sta ne 
 // it is written what to do i.e. FN
-		int speed = right_motor;
-		int speed_sign = (speed >0 ) - (speed <0);
-	switch gpio_driver_buffer[0]
+	int speed_sign = (speed >0 ) - (speed <0), speed_sign_new;
+
+	switch (gpio_driver_buffer[0])
 	{
 		case 'F' : 
 			if(speed_sign >= 0)
@@ -648,16 +728,18 @@ static ssize_t gpio_driver_write(struct file *filp, const char *buf, size_t len,
 
 		default:
 			speed -= 1*(speed_sign); // 'N'
-
+			break;
 	}
-		if (speed_sign != (speed >0 ) - (speed <0))
-			speed = 0;
+	speed_sign_new = (speed >0 ) - (speed <0); 
 		
-		right_motor = speed;
-		left_motor = speed;
-		
+	if(speed_sign != 0)
+		speed *= ( speed_sign == speed_sign_new ); //  if speed was 1 and after B it goes to 0 not to -1
 
-	switch gpio_driver_buffer[1]
+	if( speed*speed_sign > 10)
+		speed = 10*( speed_sign); // preventing overflow
+		
+		
+	switch (gpio_driver_buffer[1])
 	{
 		case 'L':
 			left = 2;
@@ -671,8 +753,6 @@ static ssize_t gpio_driver_write(struct file *filp, const char *buf, size_t len,
 			left = 1; right = 1;
 	}
 		
-	
-
  
         return len;
     }
