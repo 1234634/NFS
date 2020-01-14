@@ -233,10 +233,11 @@ void  pwmSeter(void)
 void motorsDirectionsSeter(void)
 {
 	
-	int enable,value2A;
+	int enableR,enableL,value2A;
 	
 	
-	enable = (speed != 0);
+	enableR = ((speed/right) != 0);
+	enableL = ((speed/left) !=0);
 	gpioOutput( EN_RIGHT, enable);
 	gpioOutput( EN_LEFT, enable);
 
@@ -339,17 +340,17 @@ void SetInternalPullUpDown(char pin, PUD pull)
        to remove the current Pull-up/down). */
     iowrite32(pull, virt_gpio_base + gppud_offset);
 
-    /* Wait 150 cycles – this provides the required set-up time for the control signal */
+    /* Wait 150 cycles Â– this provides the required set-up time for the control signal */
 
     /* Write to GPPUDCLK0/1 to clock the control signal into the GPIO pads you wish to
-       modify – NOTE only the pads which receive a clock will be modified, all others will
+       modify Â– NOTE only the pads which receive a clock will be modified, all others will
        retain their previous state. */
     tmp = ioread32(virt_gpio_base + gppudclk_offset);
     mask = 0x1 << pin;
     tmp |= mask;
     iowrite32(tmp, virt_gpio_base + gppudclk_offset);
 
-    /* Wait 150 cycles – this provides the required hold time for the control signal */
+    /* Wait 150 cycles Â– this provides the required hold time for the control signal */
 
     /* Write to GPPUD to remove the control signal. */
     iowrite32(PULL_NONE, virt_gpio_base + gppud_offset);
