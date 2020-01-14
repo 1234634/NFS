@@ -142,14 +142,15 @@ typedef enum {GPIO_DIRECTION_IN = 0, GPIO_DIRECTION_OUT = 1} DIRECTION;
 #define GPIO_26 (26)
 #define GPIO_27 (27)
 #define EN_LEFT (27)
-#define EN_RIGHT (27)
+#define EN_RIGHT (23)
 #define PWM_LEFT (18)
-#define PWM_RIGHT (18)
+#define PWM_RIGHT (22)
 #define PIN_2A_LEFT (17)  // forward 0, backward 1 
-#define PIN_2A_RIGHT (17)
+#define PIN_2A_RIGHT (21)
 #define STATUS_TEXT "__ rightMotorSpeed = %d, leftMotorSpeed = %d "  
-#define IDLE_COUNTER_MAX 10
+#define IDLE_COUNTER_MAX 6
 #define PINS_STATUS "EN = %d; PWM = %d; 2A = %d "
+#define MAX_SPEED 6
 static int speed =0, left =1, right=1, pwmCounter = 0,idleCounter = 0; //modularnost bi se dobila ako r i l imaju sign tj. r e[ -2, -1,1,2]
 bool fourLights = false;
 
@@ -205,17 +206,23 @@ i */
 void  pwmSeter(void)
 {	
 
-	int pwmR,pwmL;
-		
+	int pwmR,pwmL,pwmValue,offset = 4;
 	
-	pwmL = ( ( 10 + speed/left ) % 10) > pwmCounter;
-	pwmR = ( ( 10 + speed/right ) % 10 ) > pwmCounter;
 
-	pwmL =1; pwmR=1;
+	if ( speed >= 0)
+	{
+		pwmValue = speed + offset * (speed != 0);
+	}
+	else
+	{
+		pwmValue = 10 + speed - offset;
+	}
+
+	
+	pwmL = pwmValue/left >= pwmCounter;
+	pwmR = pwmValue/right >= pwmCounter;
 	gpioOutput( PWM_RIGHT, pwmR);
 	gpioOutput( PWM_LEFT, pwmL);
-
-       // printk(KERN_INFO "pwmL: %d; pwmCounter= %d ",pwmL,pwmCounter);
 	
 	++pwmCounter;
         pwmCounter %= 10;
@@ -535,14 +542,14 @@ int gpio_driver_init(void)
     SetInternalPullUpDown(GPIO_12, PULL_UP);
     SetGpioPinDirection(GPIO_12, GPIO_DIRECTION_IN);
 // Added for testing and uncoment hrtimer start 
-    gpioOutput( EN_RIGHT, 1);
+  /*  gpioOutput( EN_RIGHT, 1);
     gpioOutput( EN_LEFT, 1);
 
 	
     gpioOutput(PIN_2A_RIGHT,0);
     gpioOutput(PIN_2A_LEFT,0);
     gpioOutput( PWM_RIGHT, 1);
-    gpioOutput( PWM_LEFT, 1);
+    gpioOutput( PWM_LEFT, 1);*/
     /* Initialize high resolution timer. */
     hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
@@ -653,12 +660,12 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
     /* Size of valid data in gpio_driver - data to send in user space. */
     int data_size = 0;
     char status[BUF_LEN];
-    char status2[BUF_LEN];
+   // char status2[BUF_LEN];
 
-    snprintf(status2,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
-    snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
+    snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
+    //snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
     strcat(gpio_driver_buffer,status);  	
-    strcat(gpio_driver_buffer,status2);  	
+    //strcat(gpio_driver_buffer,status2);  	
    
 
     /* TODO: fill gpio_driver_buffer here. */
@@ -737,8 +744,8 @@ static ssize_t gpio_driver_write(struct file *filp, const char *buf, size_t len,
 	if(speed_sign != 0)
 		speed *= ( speed_sign == speed_sign_new ); //  if speed was 1 and after B it goes to 0 not to -1
 
-	if( speed*speed_sign > 10)
-		speed = 10*( speed_sign); // preventing overflow
+	if( speed*speed_sign > MAX_SPEED)
+		speed = MAX_SPEED*( speed_sign); // preventing overflow
 		
 		
 	switch (gpio_driver_buffer[1])
