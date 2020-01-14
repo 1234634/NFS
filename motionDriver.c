@@ -467,8 +467,8 @@ static enum hrtimer_restart blink_timer_callback(struct hrtimer *param)
     gpio_12_val = GetGpioPinValue(GPIO_12);
     printk(KERN_INFO "Speed:%d Right ;%d Left:%d  \n", speed,right,left);
 #endif*/
-    //pwmSeter();
-   // motorsDirectionsSeter();
+    pwmSeter();
+    motorsDirectionsSeter();
     
     hrtimer_forward(&blink_timer, ktime_get(), kt);
 
@@ -547,7 +547,7 @@ int gpio_driver_init(void)
     hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
     blink_timer.function = &blink_timer_callback;
-   // hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
+    hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
 
     return 0;
 
@@ -653,10 +653,12 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
     /* Size of valid data in gpio_driver - data to send in user space. */
     int data_size = 0;
     char status[BUF_LEN];
+    char status2[BUF_LEN];
 
-   // snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
+    snprintf(status2,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
     snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
     strcat(gpio_driver_buffer,status);  	
+    strcat(gpio_driver_buffer,status2);  	
    
 
     /* TODO: fill gpio_driver_buffer here. */

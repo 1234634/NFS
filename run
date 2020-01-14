@@ -1,0 +1,16 @@
+#!/bin/bash
+
+	
+	make
+	insmod motionDriver.ko
+	mknod /dev/motionDriver c 242 0
+
+
+	echo "FN" >> /dev/motionDriver
+	echo "FN" >> /dev/motionDriver
+	echo "FN" >> /dev/motionDriver
+	echo "FN" >> /dev/motionDriver
+	 
+	 
+	dmesg 
+	dmesg -C 
