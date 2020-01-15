@@ -147,12 +147,16 @@ typedef enum {GPIO_DIRECTION_IN = 0, GPIO_DIRECTION_OUT = 1} DIRECTION;
 #define PWM_RIGHT (22)
 #define PIN_2A_LEFT (17)  // forward 0, backward 1 
 #define PIN_2A_RIGHT (21)
-#define STATUS_TEXT "rightMotor = %d, leftMotor= %d fourLights =%d "  
+
+#define STATUS_TEXT "rightMotor = %d, leftMotor= %d, stopLight = %d , lightsOn = %d "  
 #define IDLE_COUNTER_MAX 5*1000*10
 #define PINS_STATUS "EN = %d; PWM = %d; 2A = %d "
 #define MAX_SPEED 6
-static int speed =0, left =1, right=1, pwmCounter = 0,idleCounter = 0; //modularnost bi se dobila ako r i l imaju sign tj. r e[ -2, -1,1,2]
-bool fourLights = false;
+#define SET_COUNT_MAX 500*10 //500ms 
+
+static int speed =0, left =1, right=1;
+static int pwmCounter = 0,idleCounter = 0,setCount; //modularnost bi se dobila ako r i l imaju sign tj. r e[ -2, -1,1,2]
+bool fourLights = false, stopLights = false, lightsOn = false;
 
 /* Declaration of gpio_driver.c functions */
 int gpio_driver_init(void);
@@ -186,7 +190,7 @@ int gpio_driver_major;
 char* gpio_driver_buffer;
 
 /* Blink timer vars. */
-static struct hrtimer blink_timer;
+static struct hrtimer motor_timer;
 static ktime_t kt;
 
 /* Virtual address where the physical GPIO address is mapped */
@@ -203,7 +207,76 @@ void* virt_gpio_base;
  *   returns its offset from GPIO base address.
 i */
 
-void  pwmSeter(void)
+void valueSetter(void)
+{
+	
+	int speed_sign = (speed >0 ) - (speed <0), speed_sign_new,old_speed;
+	old_speed = speed;
+
+	switch (gpio_driver_buffer[0])
+	{
+		case 'F' : 
+			if(speed_sign >= 0)
+				speed += 1;
+			else
+			 	speed +=2;
+			break;
+		case 'B' : 
+			if(speed_sign <= 0)
+				speed -= 1;
+			else
+			 	speed -=2;
+			break;
+
+		default:
+			speed -= 1*(speed_sign); // 'N'
+			break;
+	}
+	speed_sign_new = (speed >0 ) - (speed <0); 
+		
+	if(speed_sign != 0)
+		speed *= ( speed_sign == speed_sign_new ); //  if speed was 1 and after B it goes to 0 not to -1
+
+	if( speed*speed_sign > MAX_SPEED)
+		speed = MAX_SPEED*( speed_sign); // preventing overflow
+		
+		
+	switch (gpio_driver_buffer[1])
+	{
+		case 'L':
+			left = 2;
+			right = 1;
+			break;
+		case 'R':
+			left = 1;
+			right = 2;
+			break;
+		default:
+			left = 1; right = 1;
+	}
+		
+	
+	if ( old_speed > speed || speed < 0)
+		stopLights = true;
+	else
+		stopLights = false;
+
+	if ( gpio_driver_buffer[2] == 'L')
+		lightsOn = true;
+	else
+		lightsOn = false;
+
+	gpio_driver_buffer[0] = 'N';
+	gpio_driver_buffer[1] = 'N';
+	
+	
+
+
+}
+
+
+
+void  pwmSetter(void)
 {	
 
 	int pwmR,pwmL,pwmValue,offset = 4,sign_offset = 0;
@@ -231,7 +304,7 @@ void  pwmSeter(void)
 
 }
 
-void motorsDirectionsSeter(void)
+void motorsDirectionsSetter(void)
 {
 	
 	int enableR,enableL,value2A;
@@ -472,17 +545,23 @@ char GetGpioPinValue(char pin)
 
 /* timer callback function called each time the timer expires
    flashes the LED0, reads the SW0 and prints its value to kernel log */
-static enum hrtimer_restart blink_timer_callback(struct hrtimer *param)
+static enum hrtimer_restart motor_timer_callback(struct hrtimer *param)
 {
 /*#ifdef TEST
 
     gpio_12_val = GetGpioPinValue(GPIO_12);
     printk(KERN_INFO "Speed:%d Right ;%d Left:%d  \n", speed,right,left);
 #endif*/
-    pwmSeter();
-    motorsDirectionsSeter();
+    if( setCount++ == SET_COUNT_MAX)	
+     {
+	valueSetter();
+	setCount=0;
+     }
     
-    hrtimer_forward(&blink_timer, ktime_get(), kt);
+    pwmSetter();
+    motorsDirectionsSetter();
+    
+    hrtimer_forward(&motor_timer, ktime_get(), kt);
 
     return HRTIMER_RESTART;
 }
@@ -547,19 +626,11 @@ int gpio_driver_init(void)
     SetInternalPullUpDown(GPIO_12, PULL_UP);
     SetGpioPinDirection(GPIO_12, GPIO_DIRECTION_IN);
 // Added for testing and uncoment hrtimer start 
-  /*  gpioOutput( EN_RIGHT, 1);
-    gpioOutput( EN_LEFT, 1);
-
-	
-    gpioOutput(PIN_2A_RIGHT,0);
-    gpioOutput(PIN_2A_LEFT,0);
-    gpioOutput( PWM_RIGHT, 1);
-    gpioOutput( PWM_LEFT, 1);*/
     /* Initialize high resolution timer. */
-    hrtimer_init(&blink_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+    hrtimer_init(&motor_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     kt = ktime_set(TIMER_SEC, TIMER_NANO_SEC);
-    blink_timer.function = &blink_timer_callback;
-    hrtimer_start(&blink_timer, kt, HRTIMER_MODE_REL);
+    motor_timer.function = &motor_timer_callback;
+    hrtimer_start(&motor_timer, kt, HRTIMER_MODE_REL);
 
     return 0;
 
@@ -599,7 +670,7 @@ void gpio_driver_exit(void)
     printk(KERN_INFO "Removing gpio_driver module\n");
 
     /* Release high resolution timer. */
-    hrtimer_cancel(&blink_timer);
+    hrtimer_cancel(&motor_timer);
 
     /* Clear GPIO pins. */
     ClearGpioPin(GPIO_06);
@@ -667,7 +738,7 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
     char status[BUF_LEN];
    // char status2[BUF_LEN];
 
-    snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left,fourLights); 
+    snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left,stopLights,lightsOn); 
     //snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
     strcat(gpio_driver_buffer,status);  	
     //strcat(gpio_driver_buffer,status2);  	
@@ -723,50 +794,6 @@ static ssize_t gpio_driver_write(struct file *filp, const char *buf, size_t len,
     {/* TODO: use gpio_driver_buffer here. */
 	//parsiras ovde buffer valjda i onda palis ledove sta treba sta ne 
 // it is written what to do i.e. FN
-	int speed_sign = (speed >0 ) - (speed <0), speed_sign_new;
-
-	switch (gpio_driver_buffer[0])
-	{
-		case 'F' : 
-			if(speed_sign >= 0)
-				speed += 1;
-			else
-			 	speed +=2;
-			break;
-		case 'B' : 
-			if(speed_sign <= 0)
-				speed -= 1;
-			else
-			 	speed -=2;
-			break;
-
-		default:
-			speed -= 1*(speed_sign); // 'N'
-			break;
-	}
-	speed_sign_new = (speed >0 ) - (speed <0); 
-		
-	if(speed_sign != 0)
-		speed *= ( speed_sign == speed_sign_new ); //  if speed was 1 and after B it goes to 0 not to -1
-
-	if( speed*speed_sign > MAX_SPEED)
-		speed = MAX_SPEED*( speed_sign); // preventing overflow
-		
-		
-	switch (gpio_driver_buffer[1])
-	{
-		case 'L':
-			left = 2;
-			right = 1;
-			break;
-		case 'R':
-			left = 1;
-			right = 2;
-			break;
-		default:
-			left = 1; right = 1;
-	}
-		
  
         return len;
     }
