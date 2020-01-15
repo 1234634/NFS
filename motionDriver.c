@@ -206,7 +206,7 @@ i */
 void  pwmSeter(void)
 {	
 
-	int pwmR,pwmL,pwmValue,offset = 4;
+	int pwmR,pwmL,pwmValue,offset = 4,sign_offset = 0;
 	
 
 	if ( speed >= 0)
@@ -215,12 +215,13 @@ void  pwmSeter(void)
 	}
 	else
 	{
-		pwmValue = 10 + speed - offset;
+		pwmValue = speed - offset;
 	}
 
+	sign_offset = (speed < 0) * 10;
 	
-	pwmL = pwmValue/left >= pwmCounter;
-	pwmR = pwmValue/right >= pwmCounter;
+	pwmL = sign_offset + pwmValue/left >= pwmCounter;
+	pwmR = sign_offset + pwmValue/right >= pwmCounter;
 	gpioOutput( PWM_RIGHT, pwmR);
 	gpioOutput( PWM_LEFT, pwmL);
 	
