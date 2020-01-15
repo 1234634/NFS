@@ -22,7 +22,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 // timer interval defined as (TIMER_SEC + TIMER_NANO_SEC)
 #define TIMER_SEC    0
-#define TIMER_NANO_SEC  100*1000 /* 250ms */
+#define TIMER_NANO_SEC  100*1000 /* 100 micro sec  */
 
 // NOTE: Check Broadcom BCM8325 datasheet, page 91+
 // NOTE: GPIO Base address is set to 0x7E200000,
@@ -147,8 +147,8 @@ typedef enum {GPIO_DIRECTION_IN = 0, GPIO_DIRECTION_OUT = 1} DIRECTION;
 #define PWM_RIGHT (22)
 #define PIN_2A_LEFT (17)  // forward 0, backward 1 
 #define PIN_2A_RIGHT (21)
-#define STATUS_TEXT "__ rightMotorSpeed = %d, leftMotorSpeed = %d "  
-#define IDLE_COUNTER_MAX 6
+#define STATUS_TEXT "rightMotor = %d, leftMotor= %d fourLights =%d "  
+#define IDLE_COUNTER_MAX 5*1000*10
 #define PINS_STATUS "EN = %d; PWM = %d; 2A = %d "
 #define MAX_SPEED 6
 static int speed =0, left =1, right=1, pwmCounter = 0,idleCounter = 0; //modularnost bi se dobila ako r i l imaju sign tj. r e[ -2, -1,1,2]
@@ -239,23 +239,26 @@ void motorsDirectionsSeter(void)
 	
 	enableR = ((speed/right) != 0);
 	enableL = ((speed/left) !=0);
-	gpioOutput( EN_RIGHT, enable);
-	gpioOutput( EN_LEFT, enable);
+	gpioOutput( EN_RIGHT, enableR);
+	gpioOutput( EN_LEFT, enableL);
 
 	value2A = (speed < 0);
 	gpioOutput(PIN_2A_RIGHT,value2A);
 	gpioOutput(PIN_2A_LEFT,value2A);
         
 	
-	if(!enable)
+	if( !enableR && !enableL)
 	{
-		if( idleCounter != IDLE_COUNTER_MAX)
-			idleCounter++;
-		
-	}else
+		if( idleCounter++ == IDLE_COUNTER_MAX)
+		{
+			fourLights = true;
+			idleCounter--;
+		}
+	}
+	else
 	{
 		idleCounter =0;
-	
+		fourLights = false;
 	}
 		
 	fourLights = (idleCounter == IDLE_COUNTER_MAX);		
@@ -664,7 +667,7 @@ static ssize_t gpio_driver_read(struct file *filp, char *buf, size_t len, loff_t
     char status[BUF_LEN];
    // char status2[BUF_LEN];
 
-    snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left); 
+    snprintf(status,BUF_LEN,STATUS_TEXT, speed/right, speed/left,fourLights); 
     //snprintf(status,BUF_LEN,PINS_STATUS, GetGpioPinValue(EN_LEFT),GetGpioPinValue(PWM_LEFT),GetGpioPinValue(PIN_2A_LEFT)); 
     strcat(gpio_driver_buffer,status);  	
     //strcat(gpio_driver_buffer,status2);  	
